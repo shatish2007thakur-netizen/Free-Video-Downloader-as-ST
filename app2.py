@@ -50,15 +50,29 @@ if url != st.session_state.meta_url:
     st.session_state.download_ready = False
     st.session_state.meta_url = url
 
+# बेस ऑप्शन्स जो यूट्यूब के ब्लॉक को रोकने में मदद करेंगे
+BASE_YDL_OPTS = {
+    'quiet': True,
+    'no_warnings': True,
+    'extract_flat': True,
+    'nocheckcertificate': True,
+    'legacy_server_connect': True,
+    # यह सर्वर को ब्लॉक होने से बचाने के लिए क्रोम ब्राउज़र की तरह दिखाता है
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+}
+
 if url:
     is_playlist = False
     playlist_title = "Playlist"
     
     # 1. Fetch Metadata and Detect Playlist Structure
     with st.spinner("Analyzing link..."):
-        meta_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': True}
         try:
-            with yt_dlp.YoutubeDL(meta_opts) as ydl:
+            with yt_dlp.YoutubeDL(BASE_YDL_OPTS) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
                 # Check if it's a playlist containing entries
@@ -88,7 +102,7 @@ if url:
             elif "sign in" in err_msg or "age" in err_msg:
                 st.error("🔞 Error: This content is age-restricted.")
             else:
-                st.error("❌ Error: Unable to fetch details. Please verify the URL.")
+                st.error("❌ Error: Unable to fetch details. Server might be rate-limited by YouTube.")
 
     # 2. Format Selections UI
     download_type = st.selectbox("Select Download Type:", ["Video (MP4)", "Audio Only (MP3)"])
@@ -113,12 +127,13 @@ if url:
         output_dir = "downloads_temp"
         os.makedirs(output_dir, exist_ok=True)
         
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
+        # बेस हेडर को डाउनलोड ऑप्शन्स में मर्ज करना
+        ydl_opts = BASE_YDL_OPTS.copy()
+        ydl_opts.update({
+            'extract_flat': False, # डाउनलोड के समय पूरा डेटा चाहिए
             'progress_hooks': [progress_hook],
             'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
-        }
+        })
         
         if download_type == "Audio Only (MP3)":
             ydl_opts.update({
@@ -136,7 +151,6 @@ if url:
             })
             
         if is_playlist:
-            # Flatten playlist downloads to prevent nested subdirectories
             ydl_opts['noplaylist'] = False
         else:
             ydl_opts['noplaylist'] = True
@@ -154,7 +168,6 @@ if url:
 
             if is_playlist:
                 status_text.text("Packaging items into a ZIP file...")
-                # Package everything into a ZIP file for multi-file downloads
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                     for file_path in downloaded_files:
@@ -164,7 +177,6 @@ if url:
                 st.session_state.file_name = f"{playlist_title}.zip"
                 st.session_state.mime_type = "application/zip"
             else:
-                # Direct single file download pass-through
                 single_file = downloaded_files[0]
                 with open(single_file, "rb") as file:
                     st.session_state.file_data = file.read()
@@ -183,7 +195,7 @@ if url:
         except Exception as e:
             progress_bar.empty()
             status_text.empty()
-            st.error(f"❌ Processing failed: Make sure your target selection quality exists for all assets.")
+            st.error(f"❌ Processing failed: YouTube might be blocking the cloud server. Try a different video or lower quality.")
             st.session_state.download_ready = False
 
     # 4. Persistent Global Asset Downloader Trigger
